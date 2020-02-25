@@ -83,6 +83,7 @@ struct block_info {
    std::vector<WQMState> instr_needs;
    uint8_t block_needs;
    uint8_t ever_again_needs;
+   bool logical_end_wqm;
    /* more... */
 };
 
@@ -231,8 +232,17 @@ void get_block_needs(wqm_ctx &ctx, exec_ctx &exec_ctx, Block* block)
 
       /* ensure the condition controlling the control flow for this phi is in WQM */
       if (needs == WQM && instr->opcode == aco_opcode::p_phi) {
-         for (unsigned pred_idx : block->logical_preds)
+         for (unsigned pred_idx : block->logical_preds) {
             mark_block_wqm(ctx, pred_idx);
+            exec_ctx.info[pred_idx].logical_end_wqm = true;
+            ctx.worklist.insert(pred_idx);
+         }
+      }
+
+      if ((instr->opcode == aco_opcode::p_logical_end && info.logical_end_wqm) ||
+          instr->opcode == aco_opcode::p_wqm) {
+         assert(needs != Exact);
+         needs = WQM;
       }
 
       instr_needs[i] = needs;
@@ -717,14 +727,18 @@ void process_instructions(exec_ctx& ctx, Block* block,
          assert((ctx.info[block->index].exec[0].second & (mask_type_exact | mask_type_global)) == (mask_type_exact | mask_type_global));
          ctx.info[block->index].exec[0].second &= ~mask_type_initial;
 
-         int num = 0;
-         Temp cond;
-         if (instr->operands.empty()) {
+         int num;
+         Temp cond, exit_cond;
+         if (instr->operands[0].isConstant()) {
+            assert(instr->operands[0].constantValue() == -1);
             /* transition to exact and set exec to zero */
             Temp old_exec = ctx.info[block->index].exec.back().first;
             Temp new_exec = bld.tmp(s2);
-            cond = bld.sop1(aco_opcode::s_and_saveexec_b64, bld.def(s2), bld.def(s1, scc),
+            exit_cond = bld.tmp(s1);
+            cond = bld.sop1(aco_opcode::s_and_saveexec_b64, bld.def(s2), bld.scc(Definition(exit_cond)),
                             bld.exec(Definition(new_exec)), Operand(0u), bld.exec(old_exec));
+
+            num = ctx.info[block->index].exec.size() - 2;
             if (ctx.info[block->index].exec.back().second & mask_type_exact) {
                ctx.info[block->index].exec.back().first = new_exec;
             } else {
@@ -736,27 +750,26 @@ void process_instructions(exec_ctx& ctx, Block* block,
             transition_to_Exact(ctx, bld, block->index);
             assert(instr->operands[0].isTemp());
             cond = instr->operands[0].getTemp();
-            num = 1;
+            num = ctx.info[block->index].exec.size() - 1;
          }
 
-         num += ctx.info[block->index].exec.size() - 1;
-         for (int i = num - 1; i >= 0; i--) {
+         for (int i = num; i >= 0; i--) {
             if (ctx.info[block->index].exec[i].second & mask_type_exact) {
                Instruction *andn2 = bld.sop2(aco_opcode::s_andn2_b64, bld.def(s2), bld.def(s1, scc),
                                              ctx.info[block->index].exec[i].first, cond);
-               if (i == num - 1) {
+               if (i == (int)ctx.info[block->index].exec.size() - 1) {
                   andn2->operands[0].setFixed(exec);
                   andn2->definitions[0].setFixed(exec);
                }
-               if (i == 0) {
-                  instr->opcode = aco_opcode::p_exit_early_if;
-                  instr->operands[0] = bld.scc(andn2->definitions[1].getTemp());
-               }
+
                ctx.info[block->index].exec[i].first = andn2->definitions[0].getTemp();
+               exit_cond = andn2->definitions[1].getTemp();
             } else {
                assert(i != 0);
             }
          }
+         instr->opcode = aco_opcode::p_exit_early_if;
+         instr->operands[0] = bld.scc(exit_cond);
          state = Exact;
 
       } else if (instr->opcode == aco_opcode::p_fs_buffer_store_smem) {

@@ -3722,6 +3722,9 @@ void genX(CmdDispatchBase)(
          .bo = cmd_buffer->device->dynamic_state_pool.block_pool.bo,
          .offset = state.offset,
       };
+
+      /* The num_workgroups buffer goes in the binding table */
+      cmd_buffer->state.descriptors_dirty |= VK_SHADER_STAGE_COMPUTE_BIT;
    }
 
    genX(cmd_buffer_flush_compute_state)(cmd_buffer);
@@ -3772,8 +3775,12 @@ void genX(CmdDispatchIndirect)(
       return;
 #endif
 
-   if (prog_data->uses_num_work_groups)
+   if (prog_data->uses_num_work_groups) {
       cmd_buffer->state.compute.num_workgroups = addr;
+
+      /* The num_workgroups buffer goes in the binding table */
+      cmd_buffer->state.descriptors_dirty |= VK_SHADER_STAGE_COMPUTE_BIT;
+   }
 
    genX(cmd_buffer_flush_compute_state)(cmd_buffer);
 
@@ -4541,6 +4548,20 @@ cmd_buffer_begin_subpass(struct anv_cmd_buffer *cmd_buffer,
    }
 
    cmd_buffer_emit_depth_stencil(cmd_buffer);
+
+#if GEN_GEN >= 11
+   /* The PIPE_CONTROL command description says:
+    *
+    *    "Whenever a Binding Table Index (BTI) used by a Render Taget Message
+    *     points to a different RENDER_SURFACE_STATE, SW must issue a Render
+    *     Target Cache Flush by enabling this bit. When render target flush
+    *     is set due to new association of BTI, PS Scoreboard Stall bit must
+    *     be set in this packet."
+    */
+   cmd_buffer->state.pending_pipe_bits |=
+      ANV_PIPE_RENDER_TARGET_CACHE_FLUSH_BIT |
+      ANV_PIPE_STALL_AT_SCOREBOARD_BIT;
+#endif
 }
 
 static enum blorp_filter

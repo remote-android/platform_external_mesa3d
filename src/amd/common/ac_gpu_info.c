@@ -506,8 +506,8 @@ bool ac_query_gpu_info(int fd, void *dev_p,
 	 */
 	info->has_clear_state = info->chip_class >= GFX7;
 
-	info->has_distributed_tess = info->chip_class >= GFX8 &&
-				     info->max_se >= 2;
+	info->has_distributed_tess = info->chip_class >= GFX10 ||
+				     (info->chip_class >= GFX8 && info->max_se >= 2);
 
 	info->has_dcc_constant_encode = info->family == CHIP_RAVEN2 ||
 					info->family == CHIP_RENOIR ||
@@ -595,10 +595,13 @@ bool ac_query_gpu_info(int fd, void *dev_p,
 	    (info->family == CHIP_RAVEN ||
 	     info->family == CHIP_RAVEN2 ||
 	     info->family == CHIP_RENOIR)) {
+		/* Disable display DCC support because it depends
+		* on MR !2836 to work correctly.
+		 */
 		if (info->num_render_backends == 1)
-			info->use_display_dcc_unaligned = true;
+			info->use_display_dcc_unaligned = false;
 		else
-			info->use_display_dcc_with_retile_blit = true;
+			info->use_display_dcc_with_retile_blit = false;
 	}
 
 	info->has_gds_ordered_append = info->chip_class >= GFX7 &&
