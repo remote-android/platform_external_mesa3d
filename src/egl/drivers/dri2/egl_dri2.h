@@ -351,6 +351,9 @@ struct dri2_egl_surface
 
    int out_fence_fd;
    EGLBoolean enable_out_fence;
+
+   /* swrast device */
+   char *swrast_device_buffer;
 };
 
 struct dri2_egl_config
@@ -426,6 +429,10 @@ void
 dri2_get_render_type_float(const __DRIcoreExtension *core,
                            const __DRIconfig *config,
                            bool *is_float);
+
+unsigned int
+dri2_image_format_for_pbuffer_config(struct dri2_egl_display *dri2_dpy,
+                                     const __DRIconfig *config);
 
 struct dri2_egl_config *
 dri2_add_config(_EGLDisplay *disp, const __DRIconfig *dri_config, int id,
