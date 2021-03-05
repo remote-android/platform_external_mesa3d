@@ -431,7 +431,7 @@ static const struct gen_device_info gen_device_info_bdw_gt1 = {
    .is_broadwell = true,
    .num_slices = 1,
    .num_subslices = { 2, },
-   .num_eu_per_subslice = 8,
+   .num_eu_per_subslice = 6,
    .l3_banks = 2,
    .max_cs_threads = 42,
    .urb = {
@@ -1421,7 +1421,7 @@ gen_get_device_info_from_fd(int fd, struct gen_device_info *devinfo)
       return false;
 
    if (!getparam(fd, I915_PARAM_REVISION, &devinfo->revision))
-       return false;
+      devinfo->revision = 0;
 
    if (!query_topology(devinfo, fd)) {
       if (devinfo->gen >= 10) {

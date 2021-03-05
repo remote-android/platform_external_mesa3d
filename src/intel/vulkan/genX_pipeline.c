@@ -597,6 +597,10 @@ emit_rs_state(struct anv_pipeline *pipeline,
    sf.LineStippleEnable = line_info && line_info->stippledLineEnable;
 #endif
 
+#if GEN_GEN >= 12
+   sf.DerefBlockSize = PerPolyDerefMode;
+#endif
+
    const struct brw_vue_prog_data *last_vue_prog_data =
       anv_pipeline_get_last_vue_prog_data(pipeline);
 
@@ -1415,11 +1419,23 @@ emit_3dstate_streamout(struct anv_pipeline *pipeline,
          next_offset[buffer] = output->offset +
                                __builtin_popcount(component_mask) * 4;
 
-         so_decl[stream][decls[stream]++] = (struct GENX(SO_DECL)) {
-            .OutputBufferSlot = buffer,
-            .RegisterIndex = vue_map->varying_to_slot[varying],
-            .ComponentMask = component_mask,
-         };
+         const int slot = vue_map->varying_to_slot[varying];
+         if (slot < 0) {
+            /* This can happen if the shader never writes to the varying.
+             * Insert a hole instead of actual varying data.
+             */
+            so_decl[stream][decls[stream]++] = (struct GENX(SO_DECL)) {
+               .HoleFlag = true,
+               .OutputBufferSlot = buffer,
+               .ComponentMask = component_mask,
+            };
+         } else {
+            so_decl[stream][decls[stream]++] = (struct GENX(SO_DECL)) {
+               .OutputBufferSlot = buffer,
+               .RegisterIndex = slot,
+               .ComponentMask = component_mask,
+            };
+         }
       }
 
       int max_decls = 0;
@@ -2352,6 +2368,18 @@ compute_pipeline_create(
 #if GEN_GEN >= 8 || GEN_IS_HASWELL
       .CrossThreadConstantDataReadLength =
          cs_prog_data->push.cross_thread.regs,
+#endif
+#if GEN_GEN >= 12
+      /* TODO: Check if we are missing workarounds and enable mid-thread
+       * preemption.
+       *
+       * We still have issues with mid-thread preemption (it was already
+       * disabled by the kernel on gen11, due to missing workarounds). It's
+       * possible that we are just missing some workarounds, and could enable
+       * it later, but for now let's disable it to fix a GPU in compute in Car
+       * Chase (and possibly more).
+       */
+      .ThreadPreemptionDisable = true,
 #endif
 
       .NumberofThreadsinGPGPUThreadGroup = cs_prog_data->threads,

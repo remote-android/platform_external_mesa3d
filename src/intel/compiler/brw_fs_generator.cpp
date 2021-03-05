@@ -452,8 +452,17 @@ fs_generator::generate_mov_indirect(fs_inst *inst,
        * In the end, while base_offset is nice to look at in the generated
        * code, using it saves us 0 instructions and would require quite a bit
        * of case-by-case work.  It's just not worth it.
+       *
+       * There's some sort of HW bug on Gen12 which causes issues if we write
+       * to the address register in control-flow.  Since we only ever touch
+       * the address register from the generator, we can easily enough work
+       * around it by setting NoMask on the add.
        */
+      brw_push_insn_state(p);
+      if (devinfo->gen == 12)
+         brw_set_default_mask_control(p, BRW_MASK_DISABLE);
       brw_ADD(p, addr, indirect_byte_offset, brw_imm_uw(imm_byte_offset));
+      brw_pop_insn_state(p);
       brw_set_default_swsb(p, tgl_swsb_regdist(1));
 
       if (type_sz(reg.type) > 4 &&
@@ -1369,8 +1378,8 @@ fs_generator::generate_scratch_write(fs_inst *inst, struct brw_reg src)
       brw_set_default_group(p, inst->group + lower_size * i);
 
       if (i > 0) {
-         brw_set_default_swsb(p, tgl_swsb_null());
-         brw_SYNC(p, TGL_SYNC_ALLRD);
+         assert(swsb.mode & TGL_SBID_SET);
+         brw_set_default_swsb(p, tgl_swsb_sbid(TGL_SBID_SRC, swsb.sbid));
       } else {
          brw_set_default_swsb(p, tgl_swsb_src_dep(swsb));
       }
@@ -1378,11 +1387,7 @@ fs_generator::generate_scratch_write(fs_inst *inst, struct brw_reg src)
       brw_MOV(p, brw_uvec_mrf(lower_size, inst->base_mrf + 1, 0),
               retype(offset(src, block_size * i), BRW_REGISTER_TYPE_UD));
 
-      if (i + 1 < inst->exec_size / lower_size)
-         brw_set_default_swsb(p, tgl_swsb_regdist(1));
-      else
-         brw_set_default_swsb(p, tgl_swsb_dst_dep(swsb, 1));
-
+      brw_set_default_swsb(p, tgl_swsb_dst_dep(swsb, 1));
       brw_oword_block_write_scratch(p, brw_message_reg(inst->base_mrf),
                                     block_size,
                                     inst->offset + block_size * REG_SIZE * i);

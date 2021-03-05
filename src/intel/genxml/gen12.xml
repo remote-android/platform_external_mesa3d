@@ -520,6 +520,7 @@
       <value name="Ftz" value="0"/>
       <value name="SetByKernel" value="1"/>
     </field>
+    <field name="Thread Preemption Disable" start="84" end="84" type="bool"/>
     <field name="Sampler Count" start="98" end="100" type="uint">
       <value name="No samplers used" value="0"/>
       <value name="Between 1 and 4 samplers used" value="1"/>
@@ -2503,6 +2504,11 @@
       <value name="1.0 pixels" value="1"/>
       <value name="2.0 pixels" value="2"/>
       <value name="4.0 pixels" value="3"/>
+    </field>
+    <field name="Deref Block Size" start="93" end="94" type="uint">
+      <value name="Block Deref Size 32" value="0"/>
+      <value name="Per Poly Deref Mode" value="1"/>
+      <value name="Block Deref Size 8" value="2"/>
     </field>
     <field name="Point Width" start="96" end="106" type="u8.3"/>
     <field name="Point Width Source" start="107" end="107" type="uint">

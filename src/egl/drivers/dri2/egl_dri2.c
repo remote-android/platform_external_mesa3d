@@ -66,6 +66,7 @@
 #include "util/u_vector.h"
 #include "mapi/glapi/glapi.h"
 #include "util/bitscan.h"
+#include "util/u_math.h"
 
 /* Additional definitions not yet in the drm_fourcc.h.
  */
@@ -82,6 +83,48 @@
 #endif
 
 #define NUM_ATTRIBS 12
+
+static const struct dri2_pbuffer_visual {
+   unsigned int dri_image_format;
+   int rgba_shifts[4];
+   unsigned int rgba_sizes[4];
+} dri2_pbuffer_visuals[] = {
+   {
+      __DRI_IMAGE_FORMAT_ABGR16161616F,
+      { 0, 16, 32, 48 },
+      { 16, 16, 16, 16 }
+   },
+   {
+      __DRI_IMAGE_FORMAT_XBGR16161616F,
+      { 0, 16, 32, -1 },
+      { 16, 16, 16, 0 }
+   },
+   {
+      __DRI_IMAGE_FORMAT_ARGB2101010,
+      { 20, 10, 0, 30 },
+      { 10, 10, 10, 2 }
+   },
+   {
+      __DRI_IMAGE_FORMAT_XRGB2101010,
+      { 20, 10, 0, -1 },
+      { 10, 10, 10, 0 }
+   },
+   {
+      __DRI_IMAGE_FORMAT_ARGB8888,
+      { 16, 8, 0, 24 },
+      { 8, 8, 8, 8 }
+   },
+   {
+      __DRI_IMAGE_FORMAT_XRGB8888,
+      { 16, 8, 0, -1 },
+      { 8, 8, 8, 0 }
+   },
+   {
+      __DRI_IMAGE_FORMAT_RGB565,
+      { 11, 5, 0, -1 },
+      { 5, 6, 5, 0 }
+   },
+};
 
 static void
 dri_set_background_context(void *loaderPrivate)
@@ -162,15 +205,96 @@ dri2_get_pbuffer_drawable_info(__DRIdrawable * draw,
    *h = dri2_surf->base.Height;
 }
 
-/* HACK: technically we should have swrast_null, instead of these. We
- * get away since only pbuffers are supported, thus the callbacks are
- * unused.
+static int
+dri2_get_bytes_per_pixel(struct dri2_egl_surface *dri2_surf)
+{
+   const int depth = dri2_surf->base.Config->BufferSize;
+   return depth ? util_next_power_of_two(depth / 8) : 0;
+}
+
+static void
+dri2_put_image(__DRIdrawable * draw, int op,
+               int x, int y, int w, int h,
+               char *data, void *loaderPrivate)
+{
+   struct dri2_egl_surface *dri2_surf = loaderPrivate;
+   const int bpp = dri2_get_bytes_per_pixel(dri2_surf);
+   const int width = dri2_surf->base.Width;
+   const int height = dri2_surf->base.Height;
+   const int dst_stride = width*bpp;
+   const int src_stride = w*bpp;
+   const int x_offset = x*bpp;
+   int copy_width = src_stride;
+
+   if (!dri2_surf->swrast_device_buffer)
+      dri2_surf->swrast_device_buffer = malloc(height*dst_stride);
+
+   if (dri2_surf->swrast_device_buffer) {
+      const char *src = data;
+      char *dst = dri2_surf->swrast_device_buffer;
+
+      dst += x_offset;
+      dst += y*dst_stride;
+
+      /* Drivers are allowed to submit OOB PutImage requests, so clip here. */
+      if (copy_width > dst_stride - x_offset)
+         copy_width = dst_stride - x_offset;
+      if (h > height - y)
+         h = height - y;
+
+      for (; 0 < h; --h) {
+         memcpy(dst, src, copy_width);
+         dst += dst_stride;
+         src += src_stride;
+      }
+   }
+}
+
+static void
+dri2_get_image(__DRIdrawable * read,
+               int x, int y, int w, int h,
+               char *data, void *loaderPrivate)
+{
+   struct dri2_egl_surface *dri2_surf = loaderPrivate;
+   const int bpp = dri2_get_bytes_per_pixel(dri2_surf);
+   const int width = dri2_surf->base.Width;
+   const int height = dri2_surf->base.Height;
+   const int src_stride = width*bpp;
+   const int dst_stride = w*bpp;
+   const int x_offset = x*bpp;
+   int copy_width = dst_stride;
+   const char *src = dri2_surf->swrast_device_buffer;
+   char *dst = data;
+
+   if (!src) {
+      memset(data, 0, copy_width * h);
+      return;
+   }
+
+   src += x_offset;
+   src += y*src_stride;
+
+   /* Drivers are allowed to submit OOB GetImage requests, so clip here. */
+   if (copy_width > src_stride - x_offset)
+      copy_width = src_stride - x_offset;
+   if (h > height - y)
+      h = height - y;
+
+   for (; 0 < h; --h) {
+      memcpy(dst, src, copy_width);
+      src += src_stride;
+      dst += dst_stride;
+   }
+
+}
+
+/* HACK: technically we should have swrast_null, instead of these.
  */
 const __DRIswrastLoaderExtension swrast_pbuffer_loader_extension = {
    .base            = { __DRI_SWRAST_LOADER, 1 },
    .getDrawableInfo = dri2_get_pbuffer_drawable_info,
-   .putImage        = NULL,
-   .getImage        = NULL,
+   .putImage        = dri2_put_image,
+   .getImage        = dri2_get_image,
 };
 
 static const EGLint dri2_to_egl_attribute_map[__DRI_ATTRIB_MAX] = {
@@ -249,6 +373,33 @@ dri2_get_render_type_float(const __DRIcoreExtension *core,
 
    core->getConfigAttrib(config, __DRI_ATTRIB_RENDER_TYPE, &render_type);
    *is_float = (render_type & __DRI_ATTRIB_FLOAT_BIT) ? true : false;
+}
+
+unsigned int
+dri2_image_format_for_pbuffer_config(struct dri2_egl_display *dri2_dpy,
+                                     const __DRIconfig *config)
+{
+   int shifts[4];
+   unsigned int sizes[4];
+
+   dri2_get_shifts_and_sizes(dri2_dpy->core, config, shifts, sizes);
+
+   for (unsigned i = 0; i < ARRAY_SIZE(dri2_pbuffer_visuals); ++i) {
+      const struct dri2_pbuffer_visual *visual = &dri2_pbuffer_visuals[i];
+
+      if (shifts[0] == visual->rgba_shifts[0] &&
+          shifts[1] == visual->rgba_shifts[1] &&
+          shifts[2] == visual->rgba_shifts[2] &&
+          shifts[3] == visual->rgba_shifts[3] &&
+          sizes[0] == visual->rgba_sizes[0] &&
+          sizes[1] == visual->rgba_sizes[1] &&
+          sizes[2] == visual->rgba_sizes[2] &&
+          sizes[3] == visual->rgba_sizes[3]) {
+         return visual->dri_image_format;
+      }
+   }
+
+   return __DRI_IMAGE_FORMAT_NONE;
 }
 
 struct dri2_egl_config *
