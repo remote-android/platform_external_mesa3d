@@ -4802,11 +4802,11 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
          if (use_mubuf) {
             bld.mubuf(opcode,
                       Definition(fetch_dst), list, fetch_index, soffset,
-                      fetch_offset, false, false, true).instr;
+                      fetch_offset, false, false, true);
          } else {
             bld.mtbuf(opcode,
                       Definition(fetch_dst), list, fetch_index, soffset,
-                      fetch_dfmt, nfmt, fetch_offset, false, true).instr;
+                      fetch_dfmt, nfmt, fetch_offset, false, true);
          }
 
          emit_split_vector(ctx, fetch_dst, fetch_dst.size());

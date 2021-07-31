@@ -1071,7 +1071,7 @@ radv_pipeline_out_of_order_rast(struct radv_pipeline *pipeline,
 	return true;
 }
 
-static const VkConservativeRasterizationModeEXT
+static VkConservativeRasterizationModeEXT
 radv_get_conservative_raster_mode(const VkPipelineRasterizationStateCreateInfo *pCreateInfo)
 {
 	const VkPipelineRasterizationConservativeStateCreateInfoEXT *conservative_raster =
