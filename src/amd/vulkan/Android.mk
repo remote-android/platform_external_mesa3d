@@ -71,12 +71,19 @@ $(call mesa-build-with-llvm)
 LOCAL_C_INCLUDES := $(RADV_COMMON_INCLUDES)
 
 LOCAL_STATIC_LIBRARIES := \
+	libarect \
+	libcutils \
 	libmesa_aco \
 	libmesa_amd_common \
 	libmesa_nir \
 	libmesa_util \
 	libmesa_vulkan_util \
 	libmesa_git_sha1
+
+LOCAL_HEADER_LIBRARIES += \
+	libhardware_headers \
+	libsystem_headers \
+	libnativebase_headers \
 
 LOCAL_GENERATED_SOURCES += $(intermediates)/radv_entrypoints.c
 LOCAL_GENERATED_SOURCES += $(intermediates)/radv_entrypoints.h
@@ -165,9 +172,14 @@ LOCAL_WHOLE_STATIC_LIBRARIES := \
 
 LOCAL_SHARED_LIBRARIES += $(RADV_SHARED_LIBRARIES) libz libsync liblog
 
+LOCAL_HEADER_LIBRARIES += \
+	libhardware_headers \
+	libnativebase_headers \
+
 # If Android version >=8 MESA should static link libexpat else should dynamic link
 ifeq ($(shell test $(PLATFORM_SDK_VERSION) -ge 27; echo $$?), 0)
 LOCAL_STATIC_LIBRARIES := \
+	libarect \
 	libexpat
 else
 LOCAL_SHARED_LIBRARIES += \
